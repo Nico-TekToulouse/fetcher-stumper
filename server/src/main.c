@@ -29,6 +29,7 @@ static void handle_sigint(int sig)
 int main(int argc, char **argv)
 {
     int port;
+    const char *whitelist_path;
     pthread_t net_tid;
     pthread_t hb_tid;
     pthread_t ui_tid;
@@ -41,6 +42,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "server: port invalide: %s\n", argv[1]);
         return 1;
     }
+    whitelist_path = (argc > 2) ? argv[2] : NULL;
+    if (whitelist_load(&g_ctx.whitelist, whitelist_path) != 0)
+        return 1;
     client_registry_init(&g_ctx.registry);
     g_ctx.listen_fd = network_listen(port);
     if (g_ctx.listen_fd < 0) {
@@ -53,6 +57,11 @@ int main(int argc, char **argv)
     sigaction(SIGINT, &sa, NULL);
     printf("server: en écoute sur le port %d (mémoire uniquement, aucune "
         "persistance disque)\n", port);
+    if (whitelist_is_active(&g_ctx.whitelist))
+        printf("server: whitelist active (%s, %zu identifiant(s) autorise(s))\n",
+            whitelist_path, g_ctx.whitelist.count);
+    else
+        printf("server: aucune whitelist -- toute connexion est acceptee\n");
     fflush(stdout);
     pthread_create(&net_tid, NULL, network_accept_loop, &g_ctx);
     pthread_create(&hb_tid, NULL, heartbeat_monitor_loop, &g_ctx);

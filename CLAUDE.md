@@ -87,6 +87,10 @@ Voir `common/protocol.h` pour les constantes et fonctions (`protocol_build_messa
   disque nulle part (vérifié par relecture + test manuel).
 - `heartbeat_monitor` : thread qui marque un client en alerte après 6s sans heartbeat (filet
   de sécurité, voir « Cadre d'usage »).
+- `whitelist` (optionnelle) : fichier texte d'identifiants autorisés (un par ligne,
+  commentaires `#`, chargé une seule fois au démarrage). Si fourni, tout identifiant absent
+  de la liste est rejeté (`[REJET] ...` loggé, connexion TCP fermée immédiatement, aucune
+  entrée créée dans le registry). Si omis, comportement inchangé : toute connexion acceptée.
 - Interface **ncurses** (`ncurses_ui.c`/`ncurses_input.c`) : fenêtre gauche = liste des
   identifiants (vert connecté / rouge `[ALERT]`), fenêtre droite = flux des commandes du
   client sélectionné (horodaté), navigation `↑`/`↓`, `q` pour quitter l'UI. Limites
@@ -102,8 +106,18 @@ pas d'installation requise).
 
 ```sh
 make        # compile fetcher/fetcher et server/server
-./server/server [port]              # défaut: 4242
+./server/server [port] [whitelist_file]     # défaut port: 4242, whitelist: aucune (tout accepté)
 FETCHER_TEACHER_PASSWORD=<mdp> ./fetcher/fetcher -n <nom> --host <ip> --port <port>
+```
+
+`whitelist_file` (optionnel) : un identifiant autorisé par ligne, lignes vides et
+commentaires `#` ignorés. Exemple :
+
+```
+# étudiants autorisés pour l'examen du 2026-10-05
+poste-salle-a-01
+poste-salle-a-02
+alice-dupont
 ```
 
 Le mot de passe enseignant (demandé sur `SIGINT`/`SIGTERM` avant un arrêt propre du
@@ -124,8 +138,9 @@ visible dans l'UI). Pas de test automatisé (unit/CI) à ce stade.
 - Mot de passe enseignant externalisé via `FETCHER_TEACHER_PASSWORD` (décision actée, voir
   « Build »). Reste en clair en variable d'environnement (pas de hash) — acceptable pour
   l'usage actuel, à revoir si besoin d'un niveau de sécurité supérieur.
-- Pas de liste blanche de hostnames/identifiants autorisés à se connecter (décision actée :
-  non implémenté pour l'instant, le serveur accepte toute connexion entrante).
+- Liste blanche de hostnames/identifiants implémentée (`server/src/whitelist.c`), optionnelle
+  via un 2e argument CLI du serveur (voir « Build »). Limite de `WHITELIST_MAX_ENTRIES` (256)
+  entrées chargées.
 - Pas de persistance disque côté serveur (décision actée : en mémoire uniquement, rien
   n'est conservé après l'arrêt du serveur).
 - Pas de Norme Epitech stricte imposée (décision actée : style C propre, `-Wall -Wextra`

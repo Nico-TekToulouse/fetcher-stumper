@@ -62,10 +62,31 @@ void command_entry_destroy(command_entry_t *entry);
 int network_listen(int port);
 void *network_accept_loop(void *arg);
 
+/*
+** whitelist.c -- liste blanche optionnelle d'identifiants autorisés à se
+** connecter. Chargée une seule fois au démarrage depuis un fichier texte
+** (un identifiant par ligne, lignes vides et commentaires '#' ignorés).
+** Si aucun fichier n'est fourni au serveur, la whitelist reste "inactive"
+** (whitelist_is_active() retourne 0) et toute connexion est acceptée,
+** comme avant cette fonctionnalité.
+*/
+#define WHITELIST_MAX_ENTRIES 256
+
+typedef struct whitelist {
+    char entries[WHITELIST_MAX_ENTRIES][PROTO_MAX_IDENTIFIER];
+    size_t count;
+    int active;
+} whitelist_t;
+
+int whitelist_load(whitelist_t *wl, const char *path);
+int whitelist_is_active(const whitelist_t *wl);
+int whitelist_allows(const whitelist_t *wl, const char *identifier);
+
 typedef struct server_context {
     client_registry_t registry;
     int listen_fd;
     volatile int running;
+    whitelist_t whitelist;
 } server_context_t;
 
 /* ncurses_ui.c */

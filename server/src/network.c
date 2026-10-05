@@ -56,8 +56,12 @@ int network_listen(int port)
 ** Traite une ligne complète reçue d'un client (sans le '\n' final) :
 ** parse le message, identifie/crée le client dans le registry, et agit
 ** selon le type (HEARTBEAT ou CMD).
+**
+** Retourne 0 pour continuer à lire sur cette connexion, -1 si la connexion
+** doit être fermée immédiatement (identifiant refusé par la whitelist :
+** on ne laisse pas une connexion non autorisée traîner ouverte).
 */
-static void handle_line(const char *line, int fd, server_context_t *ctx)
+static int handle_line(const char *line, int fd, server_context_t *ctx)
 {
     char identifier[PROTO_MAX_IDENTIFIER];
     char type[32];
@@ -67,10 +71,16 @@ static void handle_line(const char *line, int fd, server_context_t *ctx)
 
     if (message_parse(line, identifier, sizeof(identifier), type,
         sizeof(type), payload, sizeof(payload), &payload_len) != 0)
-        return;
+        return 0;
+    if (!whitelist_allows(&ctx->whitelist, identifier)) {
+        printf("[REJET] identifiant \"%s\" non autorise (whitelist), "
+            "connexion fermee\n", identifier);
+        fflush(stdout);
+        return -1;
+    }
     client = client_registry_find_or_create(&ctx->registry, identifier);
     if (client == NULL)
-        return;
+        return 0;
     client->sockfd = fd;
     if (strcmp(type, PROTO_TYPE_HEARTBEAT) == 0) {
         client_registry_touch_heartbeat(client);
@@ -91,6 +101,7 @@ static void handle_line(const char *line, int fd, server_context_t *ctx)
         printf("[ALERT] %s : %s\n", identifier, payload);
         fflush(stdout);
     }
+    return 0;
 }
 
 /*
@@ -130,7 +141,10 @@ static void *client_thread(void *arg)
         while ((nl = memchr(acc, '\n', acc_len)) != NULL) {
             line_len = (size_t)(nl - acc);
             acc[line_len] = '\0';
-            handle_line(acc, fd, ctx);
+            if (handle_line(acc, fd, ctx) != 0) {
+                close(fd);
+                return NULL;
+            }
             memmove(acc, nl + 1, acc_len - line_len - 1);
             acc_len -= line_len + 1;
         }
