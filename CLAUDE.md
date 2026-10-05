@@ -68,13 +68,29 @@ Voir `common/protocol.h` pour les constantes et fonctions (`protocol_build_messa
 
 - `-n`/`--name NOM` pour choisir l'identifiant (sinon `gethostname()`), `-h`/`--host` et
   `-p`/`--port` pour la cible serveur (défauts `127.0.0.1:4242`).
-- Lit périodiquement `~/.bash_history` ou `~/.zsh_history` (selon `$SHELL`) depuis un offset
-  suivi (pas de relecture de l'historique déjà présent au démarrage), détecte une rotation
-  de fichier via l'inode.
-- **Limitation connue et importante** : bash et zsh n'écrivent l'historique sur disque qu'à
-  la fermeture du shell par défaut, pas après chaque commande — donc rien ne remonte tant
-  que le terminal de l'étudiant reste ouvert (ce qui est le cas pendant tout un examen).
-  Voir `fetcher/start-exam.sh` ci-dessous pour le correctif.
+- Lit périodiquement, depuis un offset suivi (pas de relecture du passé au démarrage,
+  détection de rotation via l'inode), **en priorité** le fichier désigné par la variable
+  d'environnement `FETCHER_CMDLOG` (mis en place par `fetcher/start-exam.sh`, voir
+  ci-dessous), et seulement si elle est absente, `~/.bash_history`/`~/.zsh_history` (selon
+  `$SHELL`) en fallback dégradé.
+- **Pourquoi `FETCHER_CMDLOG` et pas directement `~/.bash_history`/`~/.zsh_history`** (bug
+  réel rencontré et corrigé) : ces fichiers ne sont pas garantis append-only — bash/zsh
+  peuvent les **réécrire** (pas seulement les étendre), notamment à cause d'options de
+  déduplication (ex: zsh `HIST_IGNORE_ALL_DUPS` retire l'ancienne occurrence d'une commande
+  répétée et la rajoute en fin de fichier). Une lecture par offset brut sur un tel fichier
+  pouvait renvoyer des commandes en double, ou au contraire en sauter (typiquement une
+  commande répétée). `FETCHER_CMDLOG` est un fichier dédié, rempli uniquement par un hook
+  shell (`zshaddhistory` en zsh, `PROMPT_COMMAND`+`history 1` en bash, voir
+  `fetcher/start-exam.sh`) qui écrit chaque commande exactement une fois au moment de son
+  exécution — réellement append-only, donc fiable avec une lecture par offset.
+- **Autre limitation connue, corrigée en même temps** : bash et zsh n'écrivent de toute
+  façon l'historique sur disque qu'à la fermeture du shell par défaut, pas après chaque
+  commande — `start-exam.sh` corrige aussi ce point (option `INC_APPEND_HISTORY`/hook
+  immédiat selon le shell).
+- Le buffer lu à chaque sondage est découpé en lignes, et **chaque commande est envoyée
+  comme un message `CMD` séparé** (une ligne incomplète en fin de lecture est remise en
+  attente plutôt qu'envoyée tronquée) — évite que plusieurs commandes tapées dans la même
+  seconde ne soient fusionnées en un seul message.
 - Heartbeat toutes les `PROTO_HEARTBEAT_INTERVAL_SEC` (2s) dans un thread dédié.
 - `SIGINT`/`SIGTERM` → demande le mot de passe enseignant (`FETCHER_TEACHER_PASSWORD`, voir
   « Build »). Bon mot de passe → arrêt propre signalé au watchdog. Mauvais mot de passe →
@@ -129,11 +145,25 @@ FETCHER_TEACHER_PASSWORD=<mdp> ./fetcher/fetcher -n <nom> --host <ip> --port <po
 source fetcher/start-exam.sh -n <nom> --host <ip> --port <port>
 ```
 
-`fetcher/start-exam.sh` : corrige la limitation ci-dessus en activant `INC_APPEND_HISTORY`
-(zsh) ou `PROMPT_COMMAND="history -a;..."` (bash) dans le shell courant avant de lancer le
-fetcher en arrière-plan. Doit être **sourcé**, pas exécuté comme sous-process (sinon le
-changement d'option shell ne s'appliquerait qu'à ce sous-process, pas au shell de
-l'étudiant).
+`fetcher/start-exam.sh` : met en place le mécanisme fiable `FETCHER_CMDLOG` (voir
+« fetcher/ ») avant de lancer le fetcher en arrière-plan. Doit être **sourcé**, pas exécuté
+comme sous-process (sinon le hook/la variable d'environnement installés ne s'appliqueraient
+qu'à ce sous-process, pas au shell réellement utilisé par l'étudiant). Concrètement :
+
+- Crée un fichier temporaire unique (`mktemp`) et l'exporte dans `FETCHER_CMDLOG`.
+- **zsh** : définit la fonction `zshaddhistory()`, hook natif appelé par zsh avec la
+  commande complète en `$1` à chaque exécution, avant toute déduplication de son propre
+  historique — écrit directement dans `FETCHER_CMDLOG`.
+- **bash** : pas de hook natif aussi direct ; ajoute `history 1` (dernière entrée, texte
+  nettoyé du numéro de ligne) à `FETCHER_CMDLOG` via `PROMPT_COMMAND`, donc une fois par
+  commande exécutée — fonctionne même si `HISTCONTROL=ignoredups` empêche bash d'ajouter une
+  nouvelle entrée à son propre historique pour une répétition.
+- Supprime le fichier temporaire à la fermeture du shell (`trap ... EXIT`) : ce n'est qu'un
+  tampon de transmission vers le serveur, pas une donnée conservée.
+- Vérifié : le hook s'enregistre correctement (`whence -w zshaddhistory` → `function`) et le
+  fichier grandit de façon strictement incrémentale à chaque commande (testé en session zsh
+  simulée). La capture en vrai terminal interactif reste à confirmer par l'utilisateur (même
+  limite de simulation que documentée précédemment).
 
 `whitelist_file` (optionnel) : un identifiant autorisé par ligne, lignes vides et
 commentaires `#` ignorés. Exemple :
@@ -160,13 +190,15 @@ visible dans l'UI). Pas de test automatisé (unit/CI) à ce stade.
 
 ## Points encore ouverts
 
-- `fetcher/start-exam.sh` (correctif de la limitation d'écriture différée de l'historique,
-  voir « fetcher/ ») : la logique (`setopt INC_APPEND_HISTORY`, `PROMPT_COMMAND`) a été
-  vérifiée isolément, mais **pas confirmée par un vrai test interactif en terminal** — les
-  outils de test automatisés disponibles ne peuvent pas simuler fidèlement l'écriture
-  incrémentale de l'historique d'un vrai shell interactif (zsh/bash ne l'écrivent qu'en
-  session TTY réelle, pas via `-c`/un script non-interactif, même avec l'option activée).
-  À valider en conditions réelles avant un examen.
+- `fetcher/start-exam.sh`/`FETCHER_CMDLOG` (correctif des bugs de commandes dupliquées/
+  manquantes et de l'écriture différée, voir « fetcher/ ») : le hook zsh s'enregistre
+  correctement et le fichier grandit de façon strictement incrémentale à chaque commande en
+  session zsh simulée, mais **pas encore confirmé par un vrai test interactif en terminal
+  par l'utilisateur** — les outils de test automatisés disponibles ont des limites pour
+  simuler fidèlement un vrai shell interactif (TTY réel, sandboxing imbriqué). À valider en
+  conditions réelles avant un examen. Le chemin bash (`PROMPT_COMMAND`+`history 1`) n'a pas
+  pu être testé du tout dans cet environnement, à vérifier en priorité si des étudiants
+  utilisent bash.
 - Mot de passe enseignant externalisé via `FETCHER_TEACHER_PASSWORD` (décision actée, voir
   « Build »). Reste en clair en variable d'environnement (pas de hash) — acceptable pour
   l'usage actuel, à revoir si besoin d'un niveau de sécurité supérieur.

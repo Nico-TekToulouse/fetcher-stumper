@@ -78,19 +78,23 @@ FETCHER_TEACHER_PASSWORD=<mot_de_passe> ./fetcher/fetcher -n <nom> --host <ip_se
 
 ### ⚠️ Lancement recommandé : `start-exam.sh`
 
-Par défaut, bash et zsh n'écrivent l'historique des commandes sur disque qu'à la
-**fermeture du terminal**, pas après chaque commande. Comme le fetcher lit ce fichier
-d'historique, il ne verrait donc rien tant que le terminal de l'étudiant reste ouvert —
-c'est-à-dire pendant tout l'examen. Pour corriger ça, lancez le fetcher avec :
+Lire directement `~/.bash_history` ou `~/.zsh_history` est peu fiable : ces fichiers ne sont
+pas garantis "append-only" (bash/zsh peuvent les réécrire, notamment à cause de la
+déduplication des commandes répétées), et par défaut ils ne sont de toute façon écrits sur
+disque qu'à la fermeture du terminal, pas après chaque commande. Résultat sans correctif :
+des commandes peuvent apparaître en double, une commande répétée peut ne jamais remonter, et
+rien ne remonte tant que le terminal reste ouvert.
+
+`start-exam.sh` corrige ça en installant un hook shell qui capture chaque commande dans un
+fichier dédié, au moment exact de son exécution :
 
 ```sh
 cd fetcher
 source start-exam.sh -n <nom> --host <ip_serveur> --port <port>
 ```
 
-**Important : ce script doit être `source`-é, pas exécuté**, sinon le réglage d'historique
-ne s'appliquerait qu'à un sous-processus et pas au terminal réellement utilisé par
-l'étudiant.
+**Important : ce script doit être `source`-é, pas exécuté**, sinon le hook installé ne
+s'appliquerait qu'à un sous-processus et pas au terminal réellement utilisé par l'étudiant.
 
 ## Protocole réseau
 

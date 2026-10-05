@@ -7,6 +7,7 @@
 */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -39,6 +40,13 @@ static int run_fetcher(fetcher_config_t *cfgp)
     printf("fetcher: actif - identifiant=\"%s\" serveur=%s:%d "
         "(processus visible, surveillance transparente de l'historique shell)\n",
         cfg.identifier, cfg.server_host, cfg.server_port);
+    if (getenv("FETCHER_CMDLOG") == NULL || getenv("FETCHER_CMDLOG")[0] == '\0') {
+        fprintf(stderr,
+            "fetcher: attention, FETCHER_CMDLOG n'est pas definie -- lecture "
+            "degradee de l'historique shell brut (peut sauter des commandes "
+            "repetees ou en renvoyer en double selon la config shell). "
+            "Lancez via 'source start-exam.sh' pour un suivi fiable.\n");
+    }
     fflush(stdout);
 
     hb_arg.sockfd = cfg.sockfd;
@@ -55,10 +63,35 @@ static int run_fetcher(fetcher_config_t *cfgp)
     for (;;) {
         n = history_tracker_poll(&tracker, buf, sizeof(buf));
         if (n > 0) {
-            if (network_send_message(cfg.sockfd, cfg.identifier,
-                    PROTO_TYPE_CMD, buf, (size_t)n) != 0) {
-                fprintf(stderr, "fetcher: echec d'envoi au serveur\n");
+            /*
+            ** Plusieurs commandes peuvent avoir été ajoutées depuis le
+            ** dernier sondage : on envoie un message CMD par ligne complète
+            ** plutôt qu'un seul message contenant tout le bloc, pour que
+            ** chaque commande apparaisse comme une entrée distincte côté
+            ** serveur. Une ligne incomplète en fin de lecture (rare : lu en
+            ** pleine écriture du hook shell) n'est PAS envoyée tronquée --
+            ** l'offset est rembobiné pour la relire complète au prochain
+            ** sondage, combinée à ce qui aura été ajouté entre-temps.
+            */
+            char *line_start = buf;
+            char *nl;
+            ssize_t consumed;
+
+            while ((nl = memchr(line_start, '\n',
+                    (size_t)(buf + n - line_start))) != NULL) {
+                size_t line_len = (size_t)(nl - line_start);
+
+                if (line_len > 0) {
+                    if (network_send_message(cfg.sockfd, cfg.identifier,
+                            PROTO_TYPE_CMD, line_start, line_len) != 0) {
+                        fprintf(stderr, "fetcher: echec d'envoi au serveur\n");
+                    }
+                }
+                line_start = nl + 1;
             }
+            consumed = line_start - buf;
+            if (consumed < n)
+                tracker.offset -= (n - consumed);
         } else if (n < 0) {
             fprintf(stderr, "fetcher: erreur de lecture de l'historique\n");
         }
