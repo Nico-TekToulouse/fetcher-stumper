@@ -93,13 +93,21 @@ Voir `common/protocol.h` pour les constantes et fonctions (`protocol_build_messa
   de sécurité, voir « Cadre d'usage »).
 - `whitelist` (optionnelle) : fichier texte d'identifiants autorisés (un par ligne,
   commentaires `#`, chargé une seule fois au démarrage). Si fourni, tout identifiant absent
-  de la liste est rejeté (`[REJET] ...` loggé, connexion TCP fermée immédiatement, aucune
-  entrée créée dans le registry). Si omis, comportement inchangé : toute connexion acceptée.
+  de la liste est rejeté (connexion TCP fermée immédiatement, aucune entrée créée dans le
+  registry). Si omis, comportement inchangé : toute connexion acceptée.
 - Interface **ncurses** (`ncurses_ui.c`/`ncurses_input.c`) : fenêtre gauche = liste des
   identifiants (vert connecté / rouge `[ALERT]`), fenêtre droite = flux des commandes du
   client sélectionné (horodaté), navigation `↑`/`↓`, `q` pour quitter l'UI. Limites
   d'affichage : 64 clients, 200 dernières commandes par client, lignes tronquées à 255
-  caractères (purement pour l'affichage, pas pour les données en mémoire).
+  caractères (purement pour l'affichage, pas pour les données en mémoire). Ligne d'aide en
+  bas : affiche aussi le dernier rejet whitelist s'il y en a un.
+- **Règle stricte depuis que ncurses est démarré (thread `ncurses_ui_loop`)** : aucun autre
+  thread (réseau, heartbeat monitor) ne doit faire de `printf`/`fflush(stdout)` — ncurses
+  contrôle alors tout l'écran du terminal, et un printf concurrent corrompt l'affichage
+  (bug réel rencontré et corrigé : voir `server/src/last_event.c`). Tout événement à montrer
+  à l'enseignant doit passer soit par le statut d'un client dans le registry (déjà lu par
+  l'UI), soit par le mécanisme `last_event_*` pour un message ponctuel sans home naturel
+  dans le registry (ex: rejet whitelist).
 
 ## Build
 

@@ -27,6 +27,7 @@
 */
 
 #include <ncurses.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include "server.h"
@@ -181,13 +182,22 @@ static void draw_commands(WINDOW *win, command_snapshot_t *cmds,
     }
 }
 
-static void draw_help_line(void)
+static void draw_help_line(server_context_t *ctx)
 {
+    static const char help[] =
+        "Up/Down: selection du client   q: quitter l'interface ncurses";
+    char rejection[160];
+    char line[256];
+
     if (LINES < 1)
         return;
     mvhline(LINES - 1, 0, ' ', COLS);
-    mvprintw(LINES - 1, 0,
-        "Up/Down: selection du client   q: quitter l'interface ncurses");
+    if (last_event_get(&ctx->last_rejection, rejection, sizeof(rejection))) {
+        snprintf(line, sizeof(line), "%s   |   %s", help, rejection);
+        mvprintw(LINES - 1, 0, "%.*s", COLS, line);
+    } else {
+        mvprintw(LINES - 1, 0, "%.*s", COLS, help);
+    }
 }
 
 static void compute_layout(int *left_w, int *right_w, int *body_h)
@@ -259,7 +269,7 @@ void *ncurses_ui_loop(void *arg)
         draw_commands(right_win, commands, cmd_count,
             selected_index >= 0 ? clients[selected_index].identifier : NULL);
 
-        draw_help_line();
+        draw_help_line(ctx);
 
         wnoutrefresh(stdscr);
         if (left_win != NULL)

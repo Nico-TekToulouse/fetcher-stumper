@@ -1,7 +1,7 @@
 NAME    = server
 SRC     = src/main.c src/network.c src/client_registry.c \
           src/heartbeat_monitor.c src/command_buffer.c src/ncurses_ui.c \
-          src/ncurses_input.c src/parser.c src/whitelist.c \
+          src/ncurses_input.c src/parser.c src/whitelist.c src/last_event.c \
           ../common/protocol.c
 OBJ     = $(SRC:.c=.o)
 CC      = cc

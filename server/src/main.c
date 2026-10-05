@@ -45,6 +45,7 @@ int main(int argc, char **argv)
     whitelist_path = (argc > 2) ? argv[2] : NULL;
     if (whitelist_load(&g_ctx.whitelist, whitelist_path) != 0)
         return 1;
+    last_event_init(&g_ctx.last_rejection);
     client_registry_init(&g_ctx.registry);
     g_ctx.listen_fd = network_listen(port);
     if (g_ctx.listen_fd < 0) {

@@ -82,11 +82,29 @@ int whitelist_load(whitelist_t *wl, const char *path);
 int whitelist_is_active(const whitelist_t *wl);
 int whitelist_allows(const whitelist_t *wl, const char *identifier);
 
+/*
+** last_event.c -- petit "dernier événement notable" affiché dans l'UI
+** ncurses (ex: dernier rejet whitelist). Ne PAS utiliser printf() depuis
+** un thread une fois ncurses démarré : ncurses contrôle alors tout
+** l'écran du terminal, et un printf concurrent corrompt l'affichage
+** (c'est exactement le bug que ce mécanisme remplace).
+*/
+typedef struct last_event {
+    char text[160];
+    int has_value;
+    pthread_mutex_t lock;
+} last_event_t;
+
+void last_event_init(last_event_t *ev);
+void last_event_set(last_event_t *ev, const char *text);
+int last_event_get(last_event_t *ev, char *out, size_t out_size);
+
 typedef struct server_context {
     client_registry_t registry;
     int listen_fd;
     volatile int running;
     whitelist_t whitelist;
+    last_event_t last_rejection;
 } server_context_t;
 
 /* ncurses_ui.c */

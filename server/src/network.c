@@ -1,5 +1,12 @@
 /*
 ** network.c -- écoute TCP et gestion des connexions clients
+**
+** Les threads clients ne font AUCUN printf() direct une fois le serveur
+** démarré : l'UI ncurses contrôle tout l'écran du terminal, et un printf()
+** concurrent corromprait l'affichage. Les commandes reçues et les statuts
+** d'alerte sont déjà visibles via le registry (lu par ncurses_ui.c) ; le
+** seul événement sans équivalent visuel (rejet whitelist, le client
+** n'étant jamais ajouté au registry) passe par last_event_set().
 */
 
 #include <stdio.h>
@@ -73,9 +80,11 @@ static int handle_line(const char *line, int fd, server_context_t *ctx)
         sizeof(type), payload, sizeof(payload), &payload_len) != 0)
         return 0;
     if (!whitelist_allows(&ctx->whitelist, identifier)) {
-        printf("[REJET] identifiant \"%s\" non autorise (whitelist), "
-            "connexion fermee\n", identifier);
-        fflush(stdout);
+        char msg[160];
+
+        snprintf(msg, sizeof(msg),
+            "Rejet whitelist: \"%s\" (connexion fermee)", identifier);
+        last_event_set(&ctx->last_rejection, msg);
         return -1;
     }
     client = client_registry_find_or_create(&ctx->registry, identifier);
@@ -87,8 +96,6 @@ static int handle_line(const char *line, int fd, server_context_t *ctx)
     } else if (strcmp(type, PROTO_TYPE_CMD) == 0) {
         client_registry_touch_heartbeat(client);
         client_registry_add_command(&ctx->registry, client, payload);
-        printf("[%s] %s\n", identifier, payload);
-        fflush(stdout);
     } else if (strcmp(type, PROTO_TYPE_KILLED) == 0) {
         /*
         ** Notification ponctuelle envoyée par le watchdog d'un fetcher
@@ -96,10 +103,9 @@ static int handle_line(const char *line, int fd, server_context_t *ctx)
         ** suite à un arrêt illégitime (kill -9, crash...). On ne touche
         ** pas le heartbeat ici : le but est de marquer l'alerte
         ** immédiatement, sans attendre/masquer via un heartbeat récent.
+        ** Visible dans l'UI via le statut CLIENT_ALERT_DISCONNECTED (rouge).
         */
         client_registry_mark_alert(client);
-        printf("[ALERT] %s : %s\n", identifier, payload);
-        fflush(stdout);
     }
     return 0;
 }
