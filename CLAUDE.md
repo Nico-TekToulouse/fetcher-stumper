@@ -71,10 +71,14 @@ Voir `common/protocol.h` pour les constantes et fonctions (`protocol_build_messa
 - Lit périodiquement `~/.bash_history` ou `~/.zsh_history` (selon `$SHELL`) depuis un offset
   suivi (pas de relecture de l'historique déjà présent au démarrage), détecte une rotation
   de fichier via l'inode.
+- **Limitation connue et importante** : bash et zsh n'écrivent l'historique sur disque qu'à
+  la fermeture du shell par défaut, pas après chaque commande — donc rien ne remonte tant
+  que le terminal de l'étudiant reste ouvert (ce qui est le cas pendant tout un examen).
+  Voir `fetcher/start-exam.sh` ci-dessous pour le correctif.
 - Heartbeat toutes les `PROTO_HEARTBEAT_INTERVAL_SEC` (2s) dans un thread dédié.
-- `SIGINT`/`SIGTERM` → demande le mot de passe enseignant (actuellement en dur dans
-  `signal_handler.c`, `TODO` documenté pour l'externaliser — voir « Points encore ouverts »).
-  Bon mot de passe → arrêt propre signalé au watchdog. Mauvais mot de passe → poursuite.
+- `SIGINT`/`SIGTERM` → demande le mot de passe enseignant (`FETCHER_TEACHER_PASSWORD`, voir
+  « Build »). Bon mot de passe → arrêt propre signalé au watchdog. Mauvais mot de passe →
+  poursuite.
 - Watchdog (`fork()` dans `main()`, avant tout le reste) : le parent surveille l'enfant via
   `waitpid()` et un pipe anonyme signalant un arrêt légitime ; si l'enfant meurt sans ce
   signal, le watchdog notifie le serveur (`KILLED`) puis relance un nouveau fetcher.
@@ -107,8 +111,21 @@ pas d'installation requise).
 ```sh
 make        # compile fetcher/fetcher et server/server
 ./server/server [port] [whitelist_file]     # défaut port: 4242, whitelist: aucune (tout accepté)
+
+# lancement direct du binaire (voir limitation historique ci-dessus/ci-dessous) :
 FETCHER_TEACHER_PASSWORD=<mdp> ./fetcher/fetcher -n <nom> --host <ip> --port <port>
+
+# lancement recommandé côté étudiant, à SOURCER (pas exécuter) depuis le shell
+# qui sera surveillé, pour que l'option d'écriture immédiate de l'historique
+# s'applique à CE shell (voir fetcher/start-exam.sh) :
+source fetcher/start-exam.sh -n <nom> --host <ip> --port <port>
 ```
+
+`fetcher/start-exam.sh` : corrige la limitation ci-dessus en activant `INC_APPEND_HISTORY`
+(zsh) ou `PROMPT_COMMAND="history -a;..."` (bash) dans le shell courant avant de lancer le
+fetcher en arrière-plan. Doit être **sourcé**, pas exécuté comme sous-process (sinon le
+changement d'option shell ne s'appliquerait qu'à ce sous-process, pas au shell de
+l'étudiant).
 
 `whitelist_file` (optionnel) : un identifiant autorisé par ligne, lignes vides et
 commentaires `#` ignorés. Exemple :
@@ -135,6 +152,13 @@ visible dans l'UI). Pas de test automatisé (unit/CI) à ce stade.
 
 ## Points encore ouverts
 
+- `fetcher/start-exam.sh` (correctif de la limitation d'écriture différée de l'historique,
+  voir « fetcher/ ») : la logique (`setopt INC_APPEND_HISTORY`, `PROMPT_COMMAND`) a été
+  vérifiée isolément, mais **pas confirmée par un vrai test interactif en terminal** — les
+  outils de test automatisés disponibles ne peuvent pas simuler fidèlement l'écriture
+  incrémentale de l'historique d'un vrai shell interactif (zsh/bash ne l'écrivent qu'en
+  session TTY réelle, pas via `-c`/un script non-interactif, même avec l'option activée).
+  À valider en conditions réelles avant un examen.
 - Mot de passe enseignant externalisé via `FETCHER_TEACHER_PASSWORD` (décision actée, voir
   « Build »). Reste en clair en variable d'environnement (pas de hash) — acceptable pour
   l'usage actuel, à revoir si besoin d'un niveau de sécurité supérieur.
@@ -150,3 +174,8 @@ visible dans l'UI). Pas de test automatisé (unit/CI) à ce stade.
   async-signal-safe au sens POSIX — à garder en tête si le code évolue.
 - Pas de backoff sur les tentatives de reconnexion du fetcher si le serveur est injoignable
   au démarrage (le watchdog le relance alors en boucle rapide).
+
+## Git
+
+- Commits et push sur ce repo sans ligne d'attribution Claude/Anthropic (pas de
+  `Co-Authored-By`, pas de mention d'outil IA) — consigne explicite de l'utilisateur.
